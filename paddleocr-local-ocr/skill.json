@@ -1,11 +1,11 @@
 {
-  "name": "lobster-eye-ocr",
-  "displayName": "龙虾的眼睛-OCR识别",
-  "version": "2.0.0",
-  "description": "龙虾专属视觉技能，支持对话框直接发图识别、文件路径/PDF识别，全本地离线无联网",
+  "name": "lobster-vision-ultimate",
+  "displayName": "🦞龙虾终极视觉",
+  "version": "3.0.0",
+  "description": "支持单张、多张图片、PDF识别，可直接看懂对话框图片，离线安全",
   "author": "qian-le",
   "license": "MIT",
   "entry": "main:execute",
   "language": "python",
-  "tags": ["OCR", "图片识别", "PDF识别", "龙虾专属", "离线", "发图即识别"]
+  "tags": ["OCR", "多图识别", "龙虾视觉", "图片识别", "PDF", "离线"]
 }
