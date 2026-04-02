@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+venv/
+.env
+*.log
+
+# IDE
+.idea/
+.vscode/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Vector databases
+chroma_db/
+faiss_index/
+
+# Models
+*.pt
+*.pth
+*.ckpt
+*.npy
+
+# OS
+.DS_Store
+Thumbs.db
