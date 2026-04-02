@@ -1,0 +1,11 @@
+{
+  "name": "paddleocr-local-ocr",
+  "displayName": "本地离线OCR识别",
+  "version": "1.0.1",
+  "description": "基于PaddleOCR/EasyOCR的本地离线图片/PDF文字识别，双引擎自动切换，无需联网、无额度限制、永久免费",
+  "author": "qian-le",
+  "license": "MIT",
+  "entry": "main:execute",
+  "language": "python",
+  "tags": ["OCR", "本地", "离线", "图片识别", "PDF识别", "双引擎", "CPU运行"]
+}
