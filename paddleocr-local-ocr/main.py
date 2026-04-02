@@ -1,207 +1,209 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-双OCR自动切换本地插件
-优先 PaddleOCR → 失败自动降级 EasyOCR
-全本地离线 | 无额度 | 合规开源
+🦞 龙虾的眼睛 - 平台发图专用OCR
+支持：对话框发图（base64/二进制）、文件路径、PDF，全本地离线
 """
 import os
 import logging
 import uuid
+import base64
+import tempfile
 from threading import Lock
-from typing import Optional
+from typing import Union, Optional
 
-# 配置日志
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger("LocalOCR")
+# 日志配置（平台可捕获）
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger = logging.getLogger("LobsterEyeOCR")
 
-# ========================
 # 全局配置
-# ========================
 CONFIG = {
     "paddle_lang": "ch",
     "easyocr_lang": ["ch_sim", "en"],
     "use_gpu": False,
     "pdf_zoom": 2,
     "conf_threshold": 0.5,
-    "temp_dir": os.environ.get('TEMP', '/tmp')
+    "temp_dir": tempfile.gettempdir()
 }
 
-# ========================
-# 全局模型+线程锁+失败缓存
-# ========================
+# 全局模型+线程锁（避免冲突）
 paddle_ocr = None
 easyocr_reader = None
 paddle_init_failed = False
 easyocr_init_failed = False
 model_lock = Lock()
-
 SUPPORT_FORMATS = (".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".pdf")
 
 
+# --------------------------
+# 工具函数：base64解码（平台发图核心）
+# --------------------------
+def decode_base64(base64_str: str) -> Optional[str]:
+    try:
+        if "," in base64_str:
+            base64_str = base64_str.split(",")[1]
+        img_data = base64.b64decode(base64_str)
+        temp_path = os.path.join(CONFIG["temp_dir"], f"lobster_ocr_{uuid.uuid4().hex[:8]}.png")
+        with open(temp_path, "wb") as f:
+            f.write(img_data)
+        return temp_path
+    except Exception as e:
+        logger.error(f"base64解码失败: {e}")
+        return None
+
+
+# --------------------------
+# 工具函数：清理临时文件
+# --------------------------
+def clean_temp(temp_path: str):
+    try:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+    except:
+        pass
+
+
+# --------------------------
+# 初始化OCR引擎
+# --------------------------
 def init_paddle() -> bool:
     global paddle_ocr, paddle_init_failed
-    if paddle_init_failed:
-        return False
-    if paddle_ocr is not None:
-        return True
+    if paddle_init_failed or paddle_ocr:
+        return paddle_ocr is not None
     with model_lock:
         try:
             from paddleocr import PaddleOCR
-            paddle_ocr = PaddleOCR(
-                lang=CONFIG["paddle_lang"],
-                use_doc_orientation_classify=False,
-                use_textline_orientation=False,
-                use_gpu=CONFIG["use_gpu"]
-            )
-            logger.info("PaddleOCR初始化成功")
+            paddle_ocr = PaddleOCR(lang=CONFIG["paddle_lang"], use_gpu=CONFIG["use_gpu"], use_doc_orientation_classify=False)
             return True
         except Exception as e:
             paddle_init_failed = True
-            logger.error(f"PaddleOCR初始化失败: {str(e)}", exc_info=True)
+            logger.error(f"PaddleOCR初始化失败: {e}")
             return False
 
 
 def init_easyocr() -> bool:
-    global easyocr_reader, easyocr_init_failed
-    if easyocr_init_failed:
-        return False
-    if easyocr_reader is not None:
-        return True
+    global easyocr_reader6, easyocr_init_failed
+    if easyocr_init_failed or easyocr_reader:
+        return easyocr_reader is not None
     with model_lock:
         try:
             import easyocr
-            easyocr_reader = easyocr.Reader(
-                CONFIG["easyocr_lang"],
-                gpu=CONFIG["use_gpu"]
-            )
-            logger.info("EasyOCR初始化成功")
+            easyocr_reader = easyocr.Reader(CONFIG["easyocr_lang"], gpu=CONFIG["use_gpu"])
             return True
         except Exception as e:
             easyocr_init_failed = True
-            logger.error(f"EasyOCR初始化失败: {str(e)}", exc_info=True)
+            logger.error(f"EasyOCR初始化失败: {e}")
             return False
 
 
-def paddle_recognize(path: str) -> Optional[str]:
-    global paddle_ocr
-    if paddle_ocr is None:
+# --------------------------
+# OCR识别核心
+# --------------------------
+def paddle_recog(path: str) -> Optional[str]:
+   / if not paddle_ocr:
         return None
     try:
-        result = paddle_ocr.ocr(path)
-        text = []
-        if result and len(result) > 0:
-            for line in result:
-                if line:
-                    for word in line:
-                        if word and len(word) >= 2:
-                            t, conf = word[1]
-                            t = str(t).strip()
-                            if t and conf >= CONFIG["conf_threshold"]:
-                                text.append(t)
+        res = paddle_ocr.ocr(path)
+        text = [w[1][0].strip() for line in res if line for w in line if w and w[1][1] >= CONFIG["conf_threshold"]]
         return "\n".join(text) if text else None
     except Exception as e:
-        logger.error(f"PaddleOCR识别失败: {str(e)}", exc_info=True)
+        logger.error(f"Paddle识别失败: {e}")
         return None
 
 
-def easyocr_recognize(path: str) -> Optional[str]:
-    global easyocr_reader
-    if easyocr_reader is None:
+def easyocr_recog(path: str) -> Optional[str]:
+    if not easyocr_reader:
         return None
     try:
-        result = easyocr_reader.readtext(path, detail=1)
-        text = [str(item[1]).strip() for item in result if item[1] and item[2] >= CONFIG["conf_threshold"]]
+        res = easyocr_reader.readtext(path, detail=1)
+        text = [x[1].strip() for x in res if x[2] >= CONFIG["conf_threshold"]]
         return "\n".join(text) if text else None
     except Exception as e:
-        logger.error(f"EasyOCR识别失败: {str(e)}", exc_info=True)
+        logger.error(f"EasyOCR识别失败: {e}")
         return None
 
 
-def clean_temp_file(file_path: str):
-    try:
-        if os.path.exists(file_path):
-            os.remove(file_path)
-            logger.debug(f"临时文件清理成功: {file_path}")
-    except Exception as e:
-        logger.warning(f"临时文件清理失败: {file_path}，原因: {str(e)}")
-
-
-def execute(file_path: str) -> str:
-    if not os.path.exists(file_path):
-        return "文件不存在"
-    
-    ext = os.path.splitext(file_path)[-1].lower()
-    if ext not in SUPPORT_FORMATS:
-        return f"不支持的文件格式，仅支持{SUPPORT_FORMATS}"
-    
-    images = []
+# --------------------------
+# 统一执行入口（适配平台所有输入）
+# --------------------------
+def execute(input_data: Union[str, bytes]) -> str:
     temp_files = []
-    unique_id = uuid.uuid4().hex[:8]
-
-    if ext == ".pdf":
-        try:
-            import fitz
-            doc = fitz.open(file_path)
-            if doc.is_encrypted:
-                doc.close()
-                return "PDF文件已加密，无法识别"
+    images = []
+    try:
+        # 1. 处理二进制输入（平台图片消息核心格式）
+        if isinstance(input_data, bytes):
+            temp_path = os.path.join(CONFIG["temp_dir"], f"lobster_ocr_{uuid.uuid4().hex[:8]}.png")
+            with open(temp_path, "wb") as f:
+                f.write(input_data)
+            temp_files.append(temp_path)
+            images.append(temp_path)
+        
+        # 2. 处理字符串输入（base64/文件路径）
+        elif isinstance(input_data, str):
+            # 2.1 是文件路径 → 直接处理
+            if os.path.exists(input_data):
+                ext = os.path.splitext(input_data)[-1].lower()
+                if ext not in SUPPORT_FORMATS:
+                    return f"不支持的格式，仅支持{SUPPORT_FORMATS}"
+                
+                # 处理PDF
+                if ext == ".pdf":
+                    try:
+                        import fitz
+                        doc = fitz.open(input_data)
+                        if doc.is_encrypted:
+                            return "PDF已加密，无法识别"
+                        for idx in range(len(doc)):
+                            pix = doc[idx].get_pixmap(matrix=fitz.Matrix(CONFIG["pdf_zoom"], CONFIG["pdf_zoom"]))
+                            temp_pdf = os.path.join(CONFIG["temp_dir"], f"lobster_ocr_pdf_{uuid.uuid4().hex[:8]}_{idx}.png")
+                            pix.save(temp_pdf)
+                            temp_files.append(temp_pdf)
+                            images.append(temp_pdf)
+                        doc.close()
+                    except Exception as e:
+                        return f"PDF转换失败: {str(e)}"
+                else:
+                    images.append(input_data)
             
-            for idx in range(len(doc)):
-                page = doc[idx]
-                pix = page.get_pixmap(matrix=fitz.Matrix(CONFIG["pdf_zoom"], CONFIG["pdf_zoom"]))
-                temp_img = os.path.join(CONFIG["temp_dir"], f"_tmp_ocr_{unique_id}_{idx}.png")
-                pix.save(temp_img)
-                images.append(temp_img)
-                temp_files.append(temp_img)
-            
-            doc.close()
-        except Exception as e:
-            for f in temp_files:
-                clean_temp_file(f)
-            return f"PDF转换失败: {str(e)}"
-    else:
-        images.append(file_path)
+            # 2.2 是base64 → 解码处理
+            else:
+                temp_path = decode_base64(input_data)
+                if not temp_path:
+                    return "图片解码失败，请检查图片格式"
+                temp_files.append(temp_path)
+                images.append(temp_path)
+        
+        else:
+            return "不支持的输入类型，仅支持图片/文件路径/PDF"
 
-    full_text = []
-    use_paddle = init_paddle()
+        # 3. 双引擎识别
+        full_text = []
+        use_paddle = init_paddle()
+        for img in images:
+            text = paddle_recog(img) if use_paddle else None
+            if not text:
+                if init_easyocr():
+                    text = easyocr_recog(img)
+            if text:
+                full_text.append(text)
+
+        # 4. 结果返回
+        result = "\n".join(full_text)
+        return result if result else "未识别到有效文字"
     
-    for img in images:
-        text = None
-        if use_paddle:
-            text = paddle_recognize(img)
-        if not text and init_easyocr():
-            text = easyocr_recognize(img)
-        
-        if text:
-            full_text.append(text)
-        
-        if img in temp_files:
-            clean_temp_file(img)
-
-    result = "\n".join(full_text)
-    return result if result else "未识别到有效文字"
+    except Exception as e:
+        return f"识别异常: {str(e)}"
+    
+    finally:
+        # 强制清理所有临时文件
+        for f in temp_files:
+            clean_temp(f)
 
 
+# 命令行测试（本地验证用）
 if __name__ == "__main__":
-    import sys
     import argparse
-    
-    parser = argparse.ArgumentParser(description="本地离线OCR识别工具")
-    parser.add_argument("file_path", type=str, help="待识别文件的路径")
-    parser.add_argument("--gpu", action="store_true", help="是否使用GPU")
-    parser.add_argument("--zoom", type=int, default=2, help="PDF放大倍数")
-    parser.add_argument("--conf", type=float, default=0.5, help="识别置信度阈值")
+    parser = argparse.ArgumentParser(description="龙虾OCR：支持图片/PDF/base64")
+    parser.add_argument("input", type=str, help="文件路径")
     args = parser.parse_args()
-
-    CONFIG["use_gpu"] = args.gpu
-    CONFIG["pdf_zoom"] = args.zoom
-    CONFIG["conf_threshold"] = args.conf
-
-    logger.info(f"开始识别文件: {args.file_path}")
-    result = execute(args.file_path)
-    print("\n=== 本地OCR识别结果 ===")
-    print(result)
+    print("识别结果：\n", execute(args.input))

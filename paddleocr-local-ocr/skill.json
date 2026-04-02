@@ -1,11 +1,11 @@
 {
-  "name": "paddleocr-local-ocr",
-  "displayName": "本地离线OCR识别",
-  "version": "1.0.1",
-  "description": "基于PaddleOCR/EasyOCR的本地离线图片/PDF文字识别，双引擎自动切换，无需联网、无额度限制、永久免费",
+  "name": "lobster-eye-ocr",
+  "displayName": "龙虾的眼睛-OCR识别",
+  "version": "2.0.0",
+  "description": "龙虾专属视觉技能，支持对话框直接发图识别、文件路径/PDF识别，全本地离线无联网",
   "author": "qian-le",
   "license": "MIT",
   "entry": "main:execute",
   "language": "python",
-  "tags": ["OCR", "本地", "离线", "图片识别", "PDF识别", "双引擎", "CPU运行"]
+  "tags": ["OCR", "图片识别", "PDF识别", "龙虾专属", "离线", "发图即识别"]
 }
